@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tagging Tool - Single Row, Tag Container, & More Fixes</title>
+  <!-- Bootstrap CSS (make sure bootstrap.min.css is in the same folder or update the path) -->
+  <link rel="stylesheet" href="bootstrap.min.css" />
+  <!-- Optionally load Bootstrap Icons for e.g. <i class='bi bi-crop'></i> -->
+  <link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css'/>
+
+  <!-- JSZip / FileSaver for ZIP downloads -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver/dist/FileSaver.min.js"></script>
+
+  <style>
+    /* 1) Fix alignment in tag container - ensure the second row is top-aligned. */
+    .tag-container {
+      border: 1px dashed #ccc;
+      padding: 4px;
+      margin-top: 4px;
+      width: 100%;
+      height: 210px; /* fixed height as requested */
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: flex;
+      flex-wrap: wrap;
+      align-content: flex-start;  /* ensure multiple rows are top-aligned */
+      align-items: flex-start;    /* each row's items also top-aligned */
+      gap: 4px;
+      justify-content: flex-start;
+    }
+
+    /* 2) Force a fixed width so cards do not resize if fewer images than pageSize. */
+    .card {
+      width: 220px;
+      display: flex;
+      flex-direction: column;
+      justify-content: start;
+    }
+
+    /* Overall layout: center container, sticky top image section, separate scroll for categories. */
+
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    .max-centered {
+      max-width: 2500px;
+      margin: 0 auto;
+    }
+
+    #imageSection {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #fff;
+      padding-bottom: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    #categoryWrapper {
+      max-height: auto;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 1rem;
+    }
+
+    /* 3) The popup on a fixed place, larger max dimension, no pointer events. */
+    #previewPopup {
+      position: fixed !important;
+      pointer-events: none;
+      display: none;
+      border: 2px solid #444;
+      background: #fff;
+      z-index: 9999;
+      /* center of screen */
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      /* allow big images but do not upscale beyond natural size. */
+      max-width: 800px;
+      max-height: 800px;
+      overflow: hidden;
+      padding: 5px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      border-radius: 8px;
+    }
+    #previewPopupImg {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .card-header,
+    .card-footer {
+      padding: 0.25rem 0.5rem;
+    }
+
+    .image-container {
+      position: relative;
+    }
+    .ratio {
+      position: relative;
+    }
+    .card-img-top {
+      object-fit: cover;
+    }
+
+    .footer-tool-btn {
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      font-size: 0.85rem;
+    }
+
+    .tag-container .badge {
+      display: inline-block;
+      max-width: 80px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      position: relative;
+      margin: 2px;
+      cursor: default;
+    }
+
+    .tag-container .badge .remove-btn {
+      display: none;
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      font-size: 0.7rem;
+    }
+    .tag-container .badge:hover .remove-btn {
+      display: inline-block;
+    }
+
+    #thumbnailContainer {
+      display: flex;
+      flex-flow: row nowrap;
+      gap: 1rem;
+      overflow-x: auto;
+    }
+
+    .category-badge {
+      cursor: pointer;
+      position: relative;
+    }
+
+    .usage-pill {
+      position: absolute;
+      top: -5px;
+      left: 100%;
+      transform: translate(-50%, 0);
+    }
+  </style>
+</head>
+<body class="bg-light">
+  <div class="container max-centered my-4">
+    <div id="imageSection"><!-- Sticky top container -->
+      <h1 class="mb-3 text-primary">Tagging Tool - Single Row, Tag Container & Combined ZIP</h1>
+
+      <!-- Dropzone -->
+      <div
+        id="dropzone"
+        class="mb-3 p-3 text-center border border-2 border-warning border-dashed rounded"
+        style="cursor: pointer;"
+        onclick="triggerFileInput()"
+      >
+        <strong>Drop your images here</strong> or click to upload
+      </div>
+      <input
+        id="fileInput"
+        type="file"
+        accept="image/*"
+        multiple
+        style="display:none;"
+        onchange="handleFiles(event)"
+      />
+
+      <!-- Category Buttons (moved up here) -->
+      <div class="mb-3">
+        <button class="btn btn-secondary me-1" onclick="addCategory()">+ Add Category</button>
+        <button class="btn btn-secondary me-1" onclick="triggerCategoryImport()">Import Category</button>
+        <input
+          id="importCategoryInput"
+          type="file"
+          accept=".json"
+          multiple
+          style="display:none;"
+          onchange="importMultipleCategories(event)"
+        />
+
+        <button class="btn btn-info me-1" onclick="clearSelected()">Clear Selected</button>
+        <button class="btn btn-info me-1" onclick="clearAll()">Clear All (Badges)</button>
+        <!-- new clear images button -->
+        <button class="btn btn-danger me-1" onclick="clearAllImages()">Remove All Images</button>
+
+        <button class="btn btn-outline-success me-1" onclick="downloadAllTexts()">Download All Texts</button>
+        <button class="btn btn-outline-success me-1" onclick="exportLayout()">Save Layout</button>
+        <input
+          id="importLayout"
+          type="file"
+          accept=".json"
+          style="display:none;"
+          onchange="importLayout(event)"
+        />
+        <button class="btn btn-outline-success me-1" onclick="triggerImport()">Load Layout</button>
+
+        <button class="btn btn-warning me-1" onclick="triggerTextFileInput()">Import Text Files</button>
+        <input
+          id="textFileInput"
+          type="file"
+          accept=".txt"
+          multiple
+          style="display:none;"
+          onchange="handleTextFiles(event)"
+        />
+
+        <button class="btn btn-outline-primary me-1" onclick="downloadAllImages()">Download All Images</button>
+        <!-- New combined zip: images + text -->
+        <button class="btn btn-outline-danger" onclick="downloadCombinedRenamed()">Download Combined ZIP (Renamed)</button>
+      </div>
+
+      <!-- Controls for how many images per page (pageSize) -->
+      <div class="d-flex align-items-center mb-3" style="gap: 0.5rem;">
+        <label for="pageSizeInput" class="form-label mb-0" style="margin-right: 0.5rem;">Images per page:</label>
+        <input type="number" id="pageSizeInput" class="form-control" value="8" min="1" max="50" style="width: 80px;"
+          onchange="updatePageSize()" />
+      </div>
+
+      <!-- Thumbnails + Pagination -->
+      <div id="thumbnailContainer" class="mb-3"></div>
+
+      <!-- Pagination Controls -->
+      <div id="paginationControls" class="d-flex align-items-center gap-2 mb-4"></div>
+    </div>
+
+    <!-- Now a separate scrollable wrapper for categories -->
+    <div id="categoryWrapper">
+      <!-- Categories Section -->
+      <div id="categories" class="row"></div>
+    </div>
+
+    <!-- Preview Popup -->
+    <div id="previewPopup">
+      <img id="previewPopupImg" />
+    </div>
+
+    <!-- Crop Modal -->
+    <div
+      id="cropModal"
+      style="
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.6);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 99999;
+      "
+    >
+      <div class="bg-white p-3 rounded">
+        <canvas
+          id="cropCanvas"
+          style="border:1px solid #333; cursor:crosshair;"
+        ></canvas>
+        <div class="mt-2 d-flex gap-2">
+          <button id="cropApplyBtn" class="btn btn-success">Apply Crop</button>
+          <button id="cropCloseBtn" class="btn btn-danger">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let imagesData = [];
+    let selectedImageIndices = new Set();
+    let categories = [];
+
+    const bootstrapColorClasses = [
+      "text-bg-primary",
+      "text-bg-secondary",
+      "text-bg-success",
+      "text-bg-danger",
+      "text-bg-warning",
+      "text-bg-info",
+      "text-bg-light",
+      "text-bg-dark"
+    ];
+    function getBootstrapBadgeClass(catIndex){
+      return bootstrapColorClasses[catIndex % bootstrapColorClasses.length];
+    }
+
+    // For preview popup => now centered & bigger
+    const previewPopup = document.getElementById("previewPopup");
+    const previewPopupImg = document.getElementById("previewPopupImg");
+
+    // For crop
+    const cropModal = document.getElementById("cropModal");
+    const cropCanvas = document.getElementById("cropCanvas");
+    const cropCtx = cropCanvas.getContext("2d");
+    let currentCropIndex = null;
+    let isMouseDown = false;
+    let startX=0, startY=0, endX=0, endY=0;
+    let displayWidth=0, displayHeight=0;
+    let originalWidth=0, originalHeight=0;
+    let scaleRatio=1;
+    let currentImage=null;
+
+    let currentPage = 1;
+    let pageSize = 8;
+
+    function updatePageSize(){
+      const val = document.getElementById("pageSizeInput").value;
+      if(!val) return;
+      pageSize = parseInt(val, 10);
+      if(pageSize < 1) pageSize = 1;
+      currentPage = 1;
+      renderImages();
+      renderPagination();
+    }
+
+    function formatBytes(bytes){
+      if(bytes < 1024) return bytes + " B";
+      const kb = bytes / 1024;
+      if(kb < 1024) return kb.toFixed(1) + " KB";
+      const mb = kb / 1024;
+      if(mb < 1024) return mb.toFixed(1) + " MB";
+      return (mb / 1024).toFixed(1) + " GB";
+    }
+
+    function triggerFileInput(){
+      document.getElementById("fileInput").click();
+    }
+
+    function handleFiles(e){
+      const files = Array.from(e.target.files);
+      let loadedCount = 0;
+
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+          const tmpImg = new Image();
+          tmpImg.onload = () => {
+            imagesData.push({
+              fileName: file.name,
+              src: ev.target.result,
+              croppedSrc: null,
+              badges: [],
+              width: tmpImg.width,
+              height: tmpImg.height,
+              fileSize: file.size
+            });
+            loadedCount++;
+            if(loadedCount === files.length){
+              renderImages();
+              renderPagination();
+            }
+          };
+          tmpImg.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function getTotalPages(){
+      return Math.ceil(imagesData.length / pageSize);
+    }
+
+    function renderPagination(){
+      const controls = document.getElementById("paginationControls");
+      controls.innerHTML = "";
+
+      const totalPages = getTotalPages();
+      if (totalPages < 2) return;
+
+      const prevBtn = document.createElement("button");
+      prevBtn.classList.add("btn", "btn-sm", "btn-outline-primary");
+      prevBtn.innerText = "Prev";
+      prevBtn.disabled = (currentPage === 1);
+      prevBtn.onclick = () => {
+        if(currentPage > 1){
+          currentPage--;
+          renderImages();
+          renderPagination();
+        }
+      };
+      controls.appendChild(prevBtn);
+
+      const infoSpan = document.createElement("span");
+      infoSpan.innerText = `Page ${currentPage} of ${totalPages}`;
+      controls.appendChild(infoSpan);
+
+      const nextBtn = document.createElement("button");
+      nextBtn.classList.add("btn", "btn-sm", "btn-outline-primary");
+      nextBtn.innerText = "Next";
+      nextBtn.disabled = (currentPage === totalPages);
+      nextBtn.onclick = () => {
+        if(currentPage < totalPages){
+          currentPage++;
+          renderImages();
+          renderPagination();
+        }
+      };
+      controls.appendChild(nextBtn);
+    }
+
+    function renderImages(){
+      const container = document.getElementById("thumbnailContainer");
+      container.innerHTML = "";
+
+      const startIndex = (currentPage - 1) * pageSize;
+      const endIndex = startIndex + pageSize;
+      const imagesToShow = imagesData.slice(startIndex, endIndex);
+
+      imagesToShow.forEach((imgObj, i) => {
+        const globalIndex = startIndex + i;
+        const card = createImageCard(imgObj, globalIndex);
+        container.appendChild(card);
+      });
+    }
+
+    function createImageCard(imgObj, index){
+      const {
+        fileName,
+        src,
+        croppedSrc,
+        badges,
+        width,
+        height,
+        fileSize
+      } = imgObj;
+
+      const cardDiv = document.createElement("div");
+      cardDiv.classList.add("card");
+
+      const cardHeader = document.createElement("div");
+      cardHeader.classList.add("card-header");
+      let isCropped = Boolean(croppedSrc);
+
+      const sizeStr = `${width}x${height}, ${formatBytes(fileSize)}`;
+      cardHeader.innerHTML = `<small>${sizeStr}${isCropped ? " <span class='badge bg-success'>Cropped</span>" : ""}</small>`;
+      cardDiv.appendChild(cardHeader);
+
+      const imageContainer = document.createElement("div");
+      imageContainer.classList.add("image-container", "ratio", "ratio-1x1");
+
+      const thumbnail = document.createElement("img");
+      thumbnail.classList.add("card-img-top");
+      thumbnail.src = croppedSrc || src;
+      thumbnail.alt = fileName;
+      thumbnail.style.objectFit = "cover";
+
+      // (3) Show popup in a fixed place, bigger
+      thumbnail.addEventListener("mouseenter", () => {
+        // do not scale up beyond the real size.
+        const tmpImage = new Image();
+        tmpImage.onload = () => {
+          // figure out actual size
+          const realW = tmpImage.width;
+          const realH = tmpImage.height;
+
+          previewPopupImg.src = thumbnail.src; // or cropped if present
+          // We do not enlarge if smaller than 800x800, but do clamp if bigger.
+          previewPopupImg.style.maxWidth = "800px";
+          previewPopupImg.style.maxHeight = "800px";
+          // no upscaling => if realW < 800, we do nothing special, because maxWidth=800 won't force it bigger.
+
+          previewPopup.style.display = "block";
+        };
+        tmpImage.src = thumbnail.src;
+      });
+
+      // we ignore mousemove for the position now => the popup is fixed center
+      // if you want to hide on mouseleave =>
+      thumbnail.addEventListener("mouseleave", () => {
+        previewPopup.style.display = "none";
+      });
+
+      thumbnail.addEventListener("click", () => toggleSelected(index));
+
+      imageContainer.appendChild(thumbnail);
+      cardDiv.appendChild(imageContainer);
+
+      const cardFooter = document.createElement("div");
+      cardFooter.classList.add("card-footer", "d-flex", "justify-content-between", "align-items-center");
+
+      const footerInfo = document.createElement("small");
+      footerInfo.textContent = "Tools:";
+
+      const toolGroup = document.createElement("div");
+      toolGroup.classList.add("d-flex", "gap-2");
+
+      const cropBtn = document.createElement("button");
+      cropBtn.classList.add("btn", "btn-sm", "btn-outline-primary", "footer-tool-btn");
+      cropBtn.innerHTML = "<i class=\"bi bi-crop\"></i>";
+      cropBtn.onclick = (e) => {
+        e.stopPropagation();
+        showCropModal(index);
+      };
+
+      const resetBtn = document.createElement("button");
+      resetBtn.classList.add("btn", "btn-sm", "btn-outline-secondary", "footer-tool-btn");
+      resetBtn.innerHTML = "<i class=\"bi bi-arrow-counterclockwise\"></i>";
+      resetBtn.onclick = (e) => {
+        e.stopPropagation();
+        imagesData[index].croppedSrc = null;
+        renderImages();
+      };
+
+      const removeBtn = document.createElement("button");
+      removeBtn.classList.add("btn", "btn-sm", "btn-outline-danger", "footer-tool-btn");
+      removeBtn.innerHTML = "<i class=\"bi bi-x-lg\"></i>";
+      removeBtn.onclick = (e) => {
+        e.stopPropagation();
+        removeImage(index);
+      };
+
+      if(isCropped){
+        toolGroup.appendChild(resetBtn);
+      } else {
+        toolGroup.appendChild(cropBtn);
+      }
+
+      toolGroup.appendChild(removeBtn);
+
+      cardFooter.appendChild(footerInfo);
+      cardFooter.appendChild(toolGroup);
+      cardDiv.appendChild(cardFooter);
+
+      const tagContainer = document.createElement("div");
+      tagContainer.classList.add("tag-container");
+
+      badges.forEach((badgeObj, badgeIndex) => {
+        const badgeEl = createBadge(badgeObj, index, badgeIndex);
+        tagContainer.appendChild(badgeEl);
+      });
+
+      cardDiv.appendChild(tagContainer);
+
+      if(selectedImageIndices.has(index)) {
+        thumbnail.style.boxShadow = "0 0 0 3px #28a745";
+      } else {
+        thumbnail.style.outline = "none";
+        thumbnail.style.boxShadow = "none";
+      }
+
+      return cardDiv;
+    }
+
+    function createBadge(badgeObj, imageIndex, badgeIndex){
+      const { text, catIndex } = badgeObj;
+      const badge = document.createElement("span");
+      const colorClass = getBootstrapBadgeClass(catIndex);
+      badge.classList.add("badge", colorClass);
+      badge.title = text;
+      badge.textContent = text;
+
+      const removeBtn = document.createElement("button");
+      removeBtn.classList.add("btn-close", "remove-btn");
+      removeBtn.onclick = (ev) => {
+        ev.stopPropagation();
+        imagesData[imageIndex].badges.splice(badgeIndex, 1);
+        renderImages();
+        renderCategories(); /* (2) re-render categories => update usage counters */
+      };
+      badge.appendChild(removeBtn);
+
+      badge.draggable = true;
+      badge.addEventListener("dragstart", ev => {
+        ev.dataTransfer.setData("text/plain", badgeIndex.toString());
+        ev.dataTransfer.effectAllowed = "move";
+      });
+      badge.addEventListener("dragover", ev => {
+        ev.preventDefault();
+        ev.dataTransfer.dropEffect = "move";
+        badge.classList.add("border", "border-info");
+      });
+      badge.addEventListener("dragleave", ev => {
+        badge.classList.remove("border", "border-info");
+      });
+      badge.addEventListener("drop", ev => {
+        ev.preventDefault();
+        badge.classList.remove("border", "border-info");
+        const fromIndex = parseInt(ev.dataTransfer.getData("text/plain"), 10);
+        const toIndex = badgeIndex;
+        const arr = imagesData[imageIndex].badges;
+        const item = arr[fromIndex];
+        arr.splice(fromIndex, 1);
+        arr.splice(toIndex, 0, item);
+        renderImages();
+        renderCategories(); // update usage
+      });
+
+      return badge;
+    }
+
+    // (2) re-render categories after usage changes => we do that in removeBadge too.
+
+    function getGlobalTagCount(text){
+      let count = 0;
+      for(const img of imagesData){
+        for(const b of img.badges){
+          if(b.text === text){
+            count++;
+          }
+        }
+      }
+      return count;
+    }
+
+    function toggleSelected(index){
+      if(selectedImageIndices.has(index)) {
+        selectedImageIndices.delete(index);
+      } else {
+        selectedImageIndices.add(index);
+      }
+      renderImages();
+    }
+
+    // (5) Crop fix => clamp the cropping area if it goes outside
+    cropCanvas.addEventListener("mousedown", e => {
+      isMouseDown = true;
+      startX = clamp(e.offsetX, 0, cropCanvas.width);
+      startY = clamp(e.offsetY, 0, cropCanvas.height);
+      endX = startX;
+      endY = startY;
+      redrawCrop();
+    });
+    cropCanvas.addEventListener("mousemove", e => {
+      if(!isMouseDown) return;
+      endX = clamp(e.offsetX, 0, cropCanvas.width);
+      endY = clamp(e.offsetY, 0, cropCanvas.height);
+      redrawCrop();
+    });
+    cropCanvas.addEventListener("mouseup", e => {
+      isMouseDown = false;
+      redrawCrop();
+    });
+    cropCanvas.addEventListener("mouseleave", e => {
+      if(isMouseDown){
+        isMouseDown = false;
+        redrawCrop();
+      }
+    });
+
+    function clamp(value, min, max){
+      return Math.max(min, Math.min(max, value));
+    }
+
+    document.getElementById("cropApplyBtn").onclick = () => applyCrop();
+    document.getElementById("cropCloseBtn").onclick = () => {
+      cropModal.style.display = "none";
+    };
+
+    function showCropModal(index){
+      currentCropIndex = index;
+      const img = new Image();
+      img.onload = () => {
+        originalWidth = img.width;
+        originalHeight = img.height;
+        displayWidth = originalWidth;
+        displayHeight = originalHeight;
+        const maxDim = 1000;
+        if(displayWidth > maxDim){
+          const ratio = maxDim / displayWidth;
+          displayWidth = maxDim;
+          displayHeight *= ratio;
+        }
+        if(displayHeight > maxDim){
+          const ratio = maxDim / displayHeight;
+          displayHeight = maxDim;
+          displayWidth *= ratio;
+        }
+        scaleRatio = originalWidth / displayWidth;
+
+        cropCanvas.width = displayWidth;
+        cropCanvas.height = displayHeight;
+        cropCanvas.style.width = displayWidth + "px";
+        cropCanvas.style.height = displayHeight + "px";
+
+        cropCtx.clearRect(0, 0, displayWidth, displayHeight);
+        cropCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
+        currentImage = img;
+
+        isMouseDown = false;
+        startX = 0;
+        startY = 0;
+        endX = 0;
+        endY = 0;
+        cropModal.style.display = "flex";
+        redrawCrop();
+      };
+      img.src = imagesData[index].croppedSrc || imagesData[index].src;
+    }
+
+    function redrawCrop(){
+      cropCtx.clearRect(0,0,displayWidth,displayHeight);
+      cropCtx.drawImage(currentImage, 0, 0, displayWidth, displayHeight);
+      const rectW = Math.abs(endX - startX);
+      const rectH = Math.abs(endY - startY);
+      if(rectW > 1 && rectH > 1){
+        cropCtx.strokeStyle = "red";
+        cropCtx.lineWidth = 2;
+        cropCtx.strokeRect(
+          Math.min(startX, endX),
+          Math.min(startY, endY),
+          rectW,
+          rectH
+        );
+      }
+    }
+
+    function applyCrop(){
+      const sx = Math.min(startX, endX) * scaleRatio;
+      const sy = Math.min(startY, endY) * scaleRatio;
+      const sw = Math.abs(endX - startX) * scaleRatio;
+      const sh = Math.abs(endY - startY) * scaleRatio;
+      const sx_i = Math.floor(sx), sy_i = Math.floor(sy);
+      const sw_i = Math.floor(sw), sh_i = Math.floor(sh);
+      if(sw_i < 2 || sh_i < 2){
+        alert("Crop region too small.");
+        return;
+      }
+      const offCanvas = document.createElement("canvas");
+      offCanvas.width = sw_i;
+      offCanvas.height = sh_i;
+      const offCtx = offCanvas.getContext("2d");
+      const fullImg = new Image();
+      fullImg.onload = () => {
+        offCtx.drawImage(
+          fullImg,
+          sx_i, sy_i, sw_i, sh_i,
+          0, 0, sw_i, sh_i
+        );
+        imagesData[currentCropIndex].croppedSrc = offCanvas.toDataURL("image/png");
+        cropModal.style.display = "none";
+        renderImages();
+      };
+      fullImg.src = imagesData[currentCropIndex].src;
+    }
+
+    // Badge + Category logic
+
+    function addBadgeToImage(imgIndex, text, catIndex){
+      const badges = imagesData[imgIndex].badges;
+      if(!badges.some(b => b.text === text)){
+        badges.push({ text, catIndex });
+      }
+    }
+
+    function addTextToAll(text, catIndex){
+      imagesData.forEach((_, i) => {
+        addBadgeToImage(i, text, catIndex);
+      });
+      renderImages();
+      renderCategories(); // ensure usage counts reflect
+    }
+
+    function addCategory(){
+      const name = prompt("Enter category name:");
+      if(!name) return;
+      // (6) prevent duplicates
+      if(categories.some(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())){
+        alert("Category '" + name + "' already exists.");
+        return;
+      }
+      categories.push({ name, textBlocks: [] });
+      renderCategories();
+    }
+
+    function addTextBlock(catIndex){
+      const txt = prompt("Enter text block:");
+      if(!txt) return;
+      categories[catIndex].textBlocks.push(txt);
+      renderCategories();
+    }
+
+    function createTextBlockElement(catIndex, textBlock, tIndex){
+      const h6 = document.createElement("h6");
+      const catColorClass = getBootstrapBadgeClass(catIndex);
+      h6.classList.add("badge", catColorClass, "me-1", "mb-1", "category-badge");
+      h6.style.position = "relative";
+      h6.innerText = textBlock;
+
+      // usage pill
+      const usageCount = getGlobalTagCount(textBlock);
+      if(usageCount > 0){
+        const pill = document.createElement("span");
+        pill.classList.add("usage-pill", "badge", "rounded-pill", "bg-danger");
+        pill.style.fontSize = "0.7rem";
+        pill.style.padding = "2px 4px";
+        pill.textContent = (usageCount > 99) ? "99+" : usageCount;
+        h6.appendChild(pill);
+      }
+
+      const removeX = document.createElement("button");
+      removeX.classList.add("btn-close");
+      removeX.style.position = "absolute";
+      removeX.style.top = "2px";
+      removeX.style.right = "2px";
+      removeX.style.fontSize = "0.7rem";
+      removeX.style.display = "none";
+
+      h6.addEventListener("mouseenter", () => {
+        removeX.style.display = "inline-block";
+      });
+      h6.addEventListener("mouseleave", () => {
+        removeX.style.display = "none";
+      });
+
+      removeX.onclick = (ev) => {
+        ev.stopPropagation();
+        categories[catIndex].textBlocks.splice(tIndex,1);
+        renderCategories();
+      };
+      h6.appendChild(removeX);
+
+      // single-click => add text to selected
+      h6.onclick = (ev) => {
+        if(ev.target === removeX) return;
+        addTextToSelected(textBlock, catIndex);
+      };
+
+      // dbl-click => add text to all if none selected
+      h6.ondblclick = (ev) => {
+        if(selectedImageIndices.size === 0){
+          addTextToAll(textBlock, catIndex);
+        }
+      };
+
+      return h6;
+    }
+
+    function addTextToSelected(textBlock, catIndex){
+      if(selectedImageIndices.size===0) return;
+      selectedImageIndices.forEach(idx => {
+        addBadgeToImage(idx, textBlock, catIndex);
+      });
+      renderImages();
+      renderCategories();
+      selectedImageIndices.clear();
+    }
+
+    function moveCategoryUp(catIndex){
+      if(catIndex===0) return;
+      [categories[catIndex-1], categories[catIndex]] = [categories[catIndex], categories[catIndex-1]];
+      renderCategories();
+    }
+
+    function moveCategoryDown(catIndex){
+      if(catIndex === categories.length-1) return;
+      [categories[catIndex], categories[catIndex+1]] = [categories[catIndex+1], categories[catIndex]];
+      renderCategories();
+    }
+
+    function renameCategory(catIndex){
+      const curName = categories[catIndex].name;
+      const newName = prompt("Rename category:", curName);
+      if(!newName || !newName.trim()) return;
+      // ensure no duplication
+      if(categories.some((c, i) => i!==catIndex && c.name.trim().toLowerCase()===newName.trim().toLowerCase())){
+        alert("Category '" + newName + "' already exists.");
+        return;
+      }
+      categories[catIndex].name = newName.trim();
+      renderCategories();
+    }
+
+    function removeCategory(catIndex){
+      const sure = confirm("Delete category " + categories[catIndex].name + "?");
+      if(!sure) return;
+      categories.splice(catIndex,1);
+      renderCategories();
+    }
+
+    function renderCategories(){
+      const catDiv = document.getElementById("categories");
+      catDiv.innerHTML = "";
+      categories.forEach((cat,cIndex) => {
+        const col = document.createElement("div");
+        col.classList.add("col-12", "mb-3");
+
+        const wrapper = document.createElement("div");
+        wrapper.classList.add("p-3", "border", "rounded");
+
+        const title = document.createElement("h5");
+        title.classList.add("mb-2", "text-primary");
+        title.innerText = cat.name;
+        wrapper.appendChild(title);
+
+        const rowOfBadges = document.createElement("div");
+        rowOfBadges.classList.add("d-flex", "flex-wrap");
+
+        cat.textBlocks.forEach((tb,tIndex) => {
+          const tbEl = createTextBlockElement(cIndex, tb, tIndex);
+          rowOfBadges.appendChild(tbEl);
+        });
+
+        wrapper.appendChild(rowOfBadges);
+
+        const moveUpBtn = document.createElement("button");
+        moveUpBtn.innerText = "↑";
+        moveUpBtn.classList.add("btn", "btn-sm", "btn-outline-secondary", "me-1");
+        moveUpBtn.onclick = () => moveCategoryUp(cIndex);
+        wrapper.appendChild(moveUpBtn);
+
+        const moveDownBtn = document.createElement("button");
+        moveDownBtn.innerText = "↓";
+        moveDownBtn.classList.add("btn", "btn-sm", "btn-outline-secondary", "me-1");
+        moveDownBtn.onclick = () => moveCategoryDown(cIndex);
+        wrapper.appendChild(moveDownBtn);
+
+        const renameBtn = document.createElement("button");
+        renameBtn.innerText = "Rename";
+        renameBtn.classList.add("btn", "btn-sm", "btn-info", "me-1");
+        renameBtn.onclick = () => renameCategory(cIndex);
+        wrapper.appendChild(renameBtn);
+
+        const delBtn = document.createElement("button");
+        delBtn.innerText = "Delete Category";
+        delBtn.classList.add("btn", "btn-sm", "btn-danger", "me-1");
+        delBtn.onclick = () => removeCategory(cIndex);
+        wrapper.appendChild(delBtn);
+
+        const addTbBtn = document.createElement("button");
+        addTbBtn.innerText = "+ Add Text Block";
+        addTbBtn.classList.add("btn", "btn-sm", "btn-secondary", "me-1");
+        addTbBtn.onclick = () => addTextBlock(cIndex);
+        wrapper.appendChild(addTbBtn);
+
+        const exportBtn = document.createElement("button");
+        exportBtn.innerText = "Export";
+        exportBtn.classList.add("btn", "btn-sm", "btn-outline-success");
+        exportBtn.onclick = () => exportSingleCategory(cIndex);
+        wrapper.appendChild(exportBtn);
+
+        col.appendChild(wrapper);
+        catDiv.appendChild(col);
+      });
+    }
+
+    function clearSelected(){
+      if(selectedImageIndices.size===0){
+        alert("No images selected!");
+        return;
+      }
+      const sure = confirm("Remove all badges from selected images?");
+      if(!sure) return;
+      selectedImageIndices.forEach(idx => {
+        imagesData[idx].badges=[];
+      });
+      renderImages();
+      renderCategories();
+      selectedImageIndices.clear();
+    }
+
+    function clearAll(){
+      const sure=confirm("Remove all badges from all images?");
+      if(!sure) return;
+      imagesData.forEach(img => img.badges=[]);
+      renderImages();
+      renderCategories();
+    }
+
+    function clearAllImages(){
+      const sure = confirm("Remove all images? This cannot be undone.");
+      if(!sure) return;
+      imagesData = [];
+      selectedImageIndices.clear();
+      currentPage = 1;
+      renderImages();
+      renderPagination();
+    }
+
+    async function downloadAllTexts(){
+      const zip = new JSZip();
+      const folder = zip.folder("tags");
+      imagesData.forEach(({ fileName, badges }) => {
+        const outName = fileName.replace(/\.[^/.]+$/, "") + ".txt";
+        const textArr = badges.map(b => b.text);
+        const textContent = textArr.join(" ");
+        folder.file(outName, textContent);
+      });
+      const blob = await zip.generateAsync({type:"blob"});
+      saveAs(blob, "all-texts.zip");
+    }
+
+    async function downloadAllImages(){
+      const zip=new JSZip();
+      const folder=zip.folder("cropped_images");
+      for(let i=0;i<imagesData.length;i++){
+        const {fileName,src,croppedSrc} = imagesData[i];
+        const dataUrl=croppedSrc||src;
+        const base64Data=dataUrl.split(",")[1];
+        const mime=dataUrl.split(",")[0].match(/:(.*?);/)[1];
+        const ext=mime.includes("jpg")?"png":"jpg";
+        const outName=fileName.replace(/\.[^/.]+$/,"")+"_cropped."+ext;
+        const byteString=atob(base64Data);
+        const arr=new Uint8Array(byteString.length);
+        for(let j=0;j<byteString.length;j++){
+          arr[j]=byteString.charCodeAt(j);
+        }
+        folder.file(outName,arr,{binary:true});
+      }
+      const blob=await zip.generateAsync({type:"blob"});
+      saveAs(blob,"all-cropped-images.zip");
+    }
+
+    async function downloadCombinedRenamed(){
+      const zip = new JSZip();
+      const folderImages = zip.folder("renamed_images");
+      const folderTexts = zip.folder("renamed_texts");
+
+      for(let i=0; i<imagesData.length; i++){
+        const idxStr = String(i).padStart(3, "0");
+        const { src, croppedSrc, badges, fileName } = imagesData[i];
+        const dataUrl = croppedSrc || src;
+        const base64Data = dataUrl.split(",")[1];
+        const mime = dataUrl.split(",")[0].match(/:(.*?);/)[1];
+        const ext = mime.includes("jpg") ? "png" : "jpg";
+        const imageName = `${idxStr}.${ext}`;
+
+        const byteString = atob(base64Data);
+        const arr = new Uint8Array(byteString.length);
+        for(let j=0; j<byteString.length; j++){
+          arr[j] = byteString.charCodeAt(j);
+        }
+        folderImages.file(imageName, arr, {binary:true});
+
+        const textName = `${idxStr}.txt`;
+        const txtContent = badges.map(b => b.text).join(" ");
+        folderTexts.file(textName, txtContent);
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      saveAs(blob, "combined-renamed.zip");
+    }
+
+    function downloadJSON(dataObj, fileName){
+      const str=JSON.stringify(dataObj, null, 2);
+      const blob=new Blob([str], {type:"application/json"});
+      const link=document.createElement("a");
+      link.href=URL.createObjectURL(blob);
+      link.download=fileName;
+      link.click();
+    }
+
+    function exportSingleCategory(catIndex){
+      const cat=categories[catIndex];
+      const obj={
+        name:cat.name,
+        textBlocks:[...cat.textBlocks]
+      };
+      const outName="category_"+cat.name.replace(/\s+/g,"_")+".json";
+      downloadJSON(obj,outName);
+    }
+
+    function exportLayout(){
+      const layout={imagesData,categories};
+      downloadJSON(layout,"layout.json");
+    }
+
+    function triggerImport(){
+      document.getElementById("importLayout").click();
+    }
+
+    function importLayout(event){
+      const file=event.target.files[0];
+      if(!file)return;
+      const reader=new FileReader();
+      reader.onload=e=>{
+        try{
+          const layout=JSON.parse(e.target.result);
+          if(layout.imagesData && layout.categories){
+            imagesData=layout.imagesData;
+            categories=layout.categories;
+            currentPage=1;
+            renderImages();
+            renderPagination();
+            renderCategories();
+          }else{
+            alert("Invalid layout file");
+          }
+        }catch(err){
+          console.error(err);
+          alert("Failed to load layout.");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function triggerTextFileInput(){
+      document.getElementById("textFileInput").click();
+    }
+    function handleTextFiles(event){
+      alert("Not fully implemented. If you want to parse .txt => badges, see code.");
+    }
+
+    // 6) Prevent same category from being loaded twice => done in addCategory & rename.
+
+    // 7) Allow importing multiple categories.
+    //    We'll read all files in event.target.files.
+
+    function triggerCategoryImport(){
+      document.getElementById("importCategoryInput").click();
+    }
+
+    function importMultipleCategories(event){
+      const files = Array.from(event.target.files);
+      if(!files.length) return;
+
+      let loadedCount = 0;
+
+      files.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try{
+            const importedCat = JSON.parse(e.target.result);
+            if(importedCat.name && importedCat.textBlocks && Array.isArray(importedCat.textBlocks)){
+              // check if category name already exists
+              const lowerName = importedCat.name.trim().toLowerCase();
+              if(!categories.some(c => c.name.trim().toLowerCase() === lowerName)){
+                categories.push(importedCat);
+              } else {
+                console.warn("Category '"+importedCat.name+"' was skipped (duplicate).");
+              }
+            } else {
+              console.warn("Invalid category file.");
+            }
+          }catch(err){
+            console.error("Failed to import category:", file.name, err);
+          }
+          loadedCount++;
+          if(loadedCount === files.length){
+            renderCategories();
+            alert("Imported " + loadedCount + " category file(s). Check console for any duplicates skipped.");
+          }
+        };
+        reader.readAsText(file);
+      });
+
+      event.target.value=""; // reset input
+    }
+
+    function removeImage(index){
+      if(!confirm("Remove this image?")) return;
+      imagesData.splice(index,1);
+      if(selectedImageIndices.has(index)){
+        selectedImageIndices.delete(index);
+      }
+      selectedImageIndices.clear();
+      if(currentPage>getTotalPages()) currentPage=getTotalPages();
+      if(currentPage<1) currentPage=1;
+      renderImages();
+      renderPagination();
+    }
+
+    function init(){
+      renderPagination();
+    }
+
+    init();
+  </script>
+</body>
+</html>
